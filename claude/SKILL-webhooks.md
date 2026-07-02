@@ -119,8 +119,10 @@ Tenant 2 (House account):
 3. Strip HTML → plain text
 4. Match sender/recipient to candidate/contact by email address
 5. Insert into `messages` table
-6. If inbound: run Claude Haiku sentiment analysis
-7. Write to `reply_sentiment` + stamp candidate profile
+6. If inbound: run `extractMessageIntel` + OOO detection
+7. If OOO: tag the message `message_type='auto_reply'`, reschedule active sequence steps, and do **not** stamp `last_responded_at`
+8. If genuine reply: write sentiment/intel, stamp `last_responded_at`, stop active enrollments, and refresh Joe
+9. If bounce/returned mail/not-delivered: set `email_invalid`, stop active enrollments, and surface the warning in the UI
 
 ---
 
@@ -147,7 +149,7 @@ const model = "claude-haiku-4-5-20251001";
 
 const prompt = `Analyze this reply and return JSON:
 {
-  "sentiment": "interested|positive|maybe|neutral|negative|not_interested|do_not_contact",
+  "sentiment": "interested|positive|maybe|neutral|negative|not_interested|do_not_contact|ooo|booked_meeting",
   "summary": "one sentence note for the recruiter"
 }
 
@@ -162,14 +164,16 @@ await supabase.from("reply_sentiment").insert({
   analyzed_at: new Date().toISOString(),
 });
 
-// Stamp on candidate profile
-await supabase.from("candidates").update({
+// Stamp on person profile
+await supabase.from("people").update({
   last_sequence_sentiment: result.sentiment,
   last_sequence_sentiment_note: result.summary,
-}).eq("id", candidate_id);
+}).eq("id", person_id);
 ```
 
 **⚠️ `do_not_contact` classification = AUTO-STOP enrollment immediately (compliance)**
+**⚠️ `ooo` classification = reschedule, not a human reply; do not count it as `last_responded_at`.**
+**⚠️ bounces/returned/not-delivered = `email_invalid` + stop sequence work; do not count as a response.**
 
 ---
 
@@ -183,23 +187,31 @@ await supabase.from("candidates").update({
 
 ### `backfill-linkedin-messages` Known Behavior
 - Creates conversation record with preview even when individual messages fail
-- Messages fail silently if triggers are broken (check `stop_enrollments_on_reply` and `update_candidate_status_from_inbound`)
+- Messages can fail to attach if identity resolution misses the person; check the backfill/Inngest logs plus `candidate_id` / `contact_id` on inserted `messages`.
 - Runs for Chris's account by default; pass `account_email` in body to run for others
 
 ---
 
 ## Reply Detection — Stop Trigger
 
-The `stop_enrollments_on_reply()` DB trigger fires on every message INSERT:
+Live reply stopping is handled in the Inngest webhook processors and backed up
+by `runSequenceAction`:
 
-```sql
--- Fires on inbound messages only
--- Uses message_type column (NOT metadata — doesn't exist)
--- connection_accepted → updates linkedin_connection_status only (doesn't stop)
--- All other inbound → stops active enrollments for candidate/contact
-```
+- Microsoft/Unipile email handlers classify OOO before stamping
+  `last_responded_at`. OOO rows are `message_type='auto_reply'` and reschedule
+  the next sequence step instead of stopping.
+- Genuine inbound replies stop active enrollments immediately via
+  `stopEnrollment(..., 'reply_received')`; the runner also calls
+  `hasRepliedSinceEnrollment()` before any send.
+- `hasRepliedSinceEnrollment()` excludes `message_type IN
+  ('connection_accepted','auto_reply')`, so connection accepts and OOO do not
+  kill a cadence.
+- Bounce handlers set `email_invalid=true` and stop active enrollments with
+  `stop_trigger='email_bounced'`; send-time preflight uses
+  `email_invalid_bounced`.
 
 **If replies aren't stopping sequences:**
-1. Check trigger exists and references `message_type` not `metadata`
-2. Check `candidate_id`/`contact_id` is populated on the message row
-3. Verify `status = 'active'` on the enrollment (not `paused`)
+1. Confirm `candidate_id`/`contact_id` is populated on the inbound message row.
+2. Confirm `message_type` is not `connection_accepted` or `auto_reply`.
+3. Verify `status = 'active'` on the enrollment (not `paused` / `stopped`).
+4. Check the Microsoft/Unipile Inngest function logs for the matching inbound.

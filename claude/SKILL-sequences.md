@@ -44,6 +44,12 @@ sequences ──< sequence_enrollments ──< sequence_step_logs   (runtime)
   enrollment, pre-scheduled at init. Columns: `status, scheduled_at, sent_at,
   channel, node_id, action_id, skip_reason, reply_received_at, reply_text,
   sentiment, internet_message_id, opened_at, open_count`.
+- **Duplicate guard (#400):** migration
+  `20260702024451_prevent_duplicate_sequence_work.sql` stops duplicate live
+  enrollments before adding unique indexes for one `active|paused` enrollment
+  per `(sequence_id, candidate_id/contact_id)` and one open
+  `scheduled|pending_connection|in_flight` step log per
+  `(enrollment_id, action_id)`.
 
 ### `sequence_step_logs.status`
 
@@ -62,7 +68,7 @@ sequences ──< sequence_enrollments ──< sequence_step_logs   (runtime)
 |---|---|---|
 | `active` | — | running |
 | `paused` | — | sequence or enrollment manually paused |
-| `stopped` | `reply_received` / `email_bounced` / `calendar_booked` / … | terminated early |
+| `stopped` | `reply_received` / `email_bounced` / `email_invalid_bounced` / `calendar_booked` / `duplicate_enrollment` / … | terminated early |
 | `completed` | `completed` | all steps fired/skipped |
 
 ---
@@ -88,18 +94,28 @@ the connection webhook never fires for an invite that was never sent).
 shared `frontend/src/server-lib/connection-accept.ts` so the `check-connections`
 cron and this runtime guard share one path.
 
-### 2. Reply guard stops everything
+### 2. Reply guard stops everything except OOO auto-replies
 `hasRepliedSinceEnrollment()` scans `messages` for an `inbound` row (excluding
-`message_type='connection_accepted'`) since `enrolled_at`, matching on
-`candidate_id`/`contact_id`. It runs both in the webhook handlers (which call
-`stopEnrollment`) and again inside `runSequenceAction` before any send.
+`message_type='connection_accepted'` and `message_type='auto_reply'`) since
+`enrolled_at`, matching on `candidate_id`/`contact_id`. It runs both in the
+webhook handlers (which call `stopEnrollment`) and again inside
+`runSequenceAction` before any send.
 `stopEnrollment` flips status to `stopped` and cancels all remaining
 `scheduled` + `pending_connection` logs.
+
+OOO is different: Microsoft/Unipile email handlers run `decideOutOfOffice()`
+before stamping `last_responded_at`. If the reply is OOO, the message is tagged
+`message_type='auto_reply'`, the enrollment is rescheduled via
+`rescheduleEnrollmentForOOO()`, and the person does **not** count as having
+answered.
 
 ### 3. Idempotency / no double-send
 `runSequenceAction` bails unless the step_log is still `in_flight` (the sweep
 is the only writer of that state), so a retry after a post-send crash can't
 re-send.
+
+The database also enforces no duplicate open sequence work (#400): one live
+enrollment per person/sequence, and one open step log per enrollment/action.
 
 ### 4. Rate-limit & transient handling
 LinkedIn `limit_exceeded` / 429 → step rescheduled +2h (still `scheduled`).
@@ -147,6 +163,12 @@ refuses to message that person again, on any sequence: `enrollment-init-runner`
 stops a new enrollment before scheduling, and `runSequenceAction` stops any
 in-flight enrollment at its pre-flight check (`stop_trigger='do_not_contact'`).
 
+`people.email_invalid` is also treated as a stop signal for email sequences.
+Bounce handlers set `email_invalid=true` and stop active enrollments; enrollment
+init and send-time preflight now stop the enrollment with
+`stop_trigger='email_invalid_bounced'` instead of repeatedly skipping future
+email steps.
+
 ---
 
 ## Channels
@@ -169,9 +191,11 @@ v1/v2 split.
 
 ### Recipient resolution
 Email column is role-aware: candidates → `personal_email` (falls back to
-`primary_email`), clients → `work_email`. Steps pre-skip when the recipient
-lacks the channel's contact field. `email_invalid` (hard bounce) is never
-re-attempted.
+`primary_email`), clients → `work_email`. Non-email steps pre-skip when the
+recipient lacks the channel's contact field; email is resolved again at send
+time so late enrichment can still land before dispatch. `email_invalid` (hard
+bounce) is never re-attempted; it stops email sequence work until the address is
+corrected.
 
 ---
 
@@ -196,10 +220,12 @@ the clamped value. The calendar handler stamps `booked_meeting` (stop_trigger
 `calendar_booked`). Keep `SequenceAnalyticsPage` `SENTIMENT_COLORS` and
 `CandidateDetail` `SENTIMENT_CONFIG` in sync with this list.
 
-Then `stopEnrollment(..., 'reply_received', replyText)` terminates the
-enrollment and `triggerSentimentAnalysis` stamps `reply_received_at` +
-`reply_text` on the last *sent* step so the analytics funnels can attribute
-the reply. (It does NOT call any AI — sentiment is already done above.)
+For a genuine non-OOO reply, the webhook stamps `last_responded_at`, then
+`stopEnrollment(..., 'reply_received', replyText)` terminates the enrollment and
+`triggerSentimentAnalysis` stamps `reply_received_at` + `reply_text` on the
+last *sent* step so the analytics funnels can attribute the reply. OOO/returned
+mail/bounce signals are operational warnings, not human answers. (This does NOT
+call any AI — sentiment is already done above.)
 
 ---
 

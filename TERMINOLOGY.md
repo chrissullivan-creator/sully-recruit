@@ -6,19 +6,19 @@ Canonical names for things that show up in many places. After Pass 5a (unified p
 
 ## Person reference
 
-After Pass 5a, **all "person" rows live in `candidates`** (with a `type` column = `'candidate'` or `'client'`). The `contacts` table is a backwards-compat VIEW.
+After Pass 6, **all "person" rows live in `people`** (with `roles` plus a synced `type` column = `'candidate'` or `'client'`). `candidates` and `contacts` are backwards-compat views over `people`.
 
 | Column name in dependent table | What to use it for | Status |
 |---|---|---|
-| `candidate_id` (FK candidates) | Person reference. Works for both candidate-type and client-type. | Current |
-| `contact_id` (FK candidates)  | Same as candidate_id. Both columns coexist on messages/conversations/etc. for legacy reasons. | Current — will collapse to one column in a future pass |
-| `person_id` (FK candidates)   | New canonical name. Used in `v_person_activity` and a few newer columns. | Preferred for new code |
+| `candidate_id` (FK people/candidates view) | Legacy person reference. Works for both candidate-type and client-type. | Current |
+| `contact_id` (FK people/contacts view)  | Same as candidate_id. Both columns coexist on messages/conversations/etc. for legacy reasons. | Current — will collapse to one column in a future pass |
+| `person_id` (FK people)   | New canonical name. Used in `v_person_activity` and a few newer columns. | Preferred for new code |
 | `entity_type` + `entity_id`   | Polymorphic reference. `entity_type` is one of `candidate`/`contact`/`candidate_job`/`job`. Used by activity-log tables. | Current |
 | `related_to_type` + `related_to_id` | Same pattern as entity_type/entity_id, but on `tasks`. | Legacy — will rename to entity_type/entity_id |
 | `linked_contact_id` / `linked_candidate_id` | Self-reference — when the same person is BOTH a candidate and a client. | Current |
-| `interviewer_contact_id` | Specific FK on `interviews` to the client-side interviewer. Same as candidate_id semantically. | Current |
+| `interviewer_contact_id` | Specific FK on `interviews` to the client-side interviewer. Same as person_id semantically. | Current |
 
-**Rule:** when adding a NEW column referencing a person, use `person_id` (single FK to candidates(id)). Don't add new `candidate_id` + `contact_id` pairs.
+**Rule:** when adding a NEW column referencing a person, use `person_id` (single FK to `people(id)`). Don't add new `candidate_id` + `contact_id` pairs.
 
 ---
 
@@ -59,6 +59,8 @@ Multiple "status" and "stage" columns. They mean different things.
 | `placements.invoice_status` | Invoice lifecycle for a placement | TBD |
 
 **Rule:** "status" = lifecycle of the row itself. "stage" = position in a multi-step process. They can coexist — e.g., a `sequence_enrollment` has a `status` (is it currently running?) but the candidate also has a per-job `pipeline_stage`.
+
+**Response status rule:** `last_responded_at` means a human answer. Out-of-office auto-replies, returned mail, bounces, and not-delivered events are operational flags, not engagement. The UI should surface them as warnings without promoting a person to `engaged`.
 
 ---
 
@@ -129,4 +131,4 @@ These changes are tracked but not done because they require coordinated app code
 2. **Rename `owner_id` → `owner_user_id`** on call_logs, conversations, interviews, messages, ai_call_notes.
 3. **Collapse `candidate_id + contact_id` → `person_id`** on messages, conversations, call_logs, ai_call_notes, ai_runs, send_outs, sequence_enrollments, reply_sentiment, search_documents, placements, call_processing_queue.
 4. **Rename `tasks.related_to_type/id` → `entity_type/id`** for consistency.
-5. **Drop the `contacts` view** after all frontend code queries `candidates` directly.
+5. **Drop the `contacts` / `candidates` compatibility views** after all frontend and backend code queries `people` directly.
